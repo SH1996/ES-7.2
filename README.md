@@ -3,7 +3,7 @@ curl "http://fanyi.baidu.com" and other [issue]()
 
 Elasticsearch Reference:  
 [Elasticsearch introduction](./Elasticsearch-introduction.md)   
-[Getting started with Elasticsearch]()  
+[Getting started with Elasticsearch](./Getting-started-with-Elasticsearch.md)  
 [Set up Elasticsearch]()  
 [Upgrade Elasticsearch]()  
 [API conventions]()    
