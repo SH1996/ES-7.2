@@ -328,3 +328,661 @@ DELETE /customer
 
 这种REST访问模式在所有API命令中都非常普遍，如果您能简单地记住它，那么您将在掌握ElasticSearch方面有一个很好的开端。
 
+<h2>Modifying Your Data</h2>
+
+ElasticSearch提供近实时的数据操作和搜索功能。默认情况下，从索引/更新/删除数据到数据出现在搜索结果中，您可以期待一秒钟的延迟（刷新间隔）。这是与其他平台（如SQL）的一个重要区别，在SQL中，数据在事务完成后立即可用。
+
+<h3>Indexing/Replacing Documents</h3>
+
+我们以前见过如何索引单个文档。让我们再次回忆一下这个命令：
+
+```
+PUT /customer/_doc/1?pretty
+{
+  "name": "John Doe"
+}
+```
+
+同样，上面将把指定的文档索引到客户索引中，ID为1。如果我们用不同的（或相同的）文档再次执行上述命令，那么ElasticSearch将在现有文档的基础上替换（即重新索引）一个ID为1的新文档：
+
+```
+PUT /customer/_doc/1?pretty
+{
+  "name": "Jane Doe"
+}
+```
+
+上面将ID为1的文档的名称从“John Doe”更改为“Jane Doe”。另一方面，如果我们使用不同的ID，则将为新文档编制索引，并且索引中已有的文档将保持不变。
+
+```
+PUT /customer/_doc/2?pretty
+{
+  "name": "Jane Doe"
+}
+```
+
+上面的索引是一个ID为2的新文档。
+
+索引时，ID部分是可选的。如果未指定，ElasticSearch将生成一个随机ID，然后使用它为文档编制索引。ElasticSearch生成的实际ID（或在前面的示例中显式指定的任何内容）作为索引API调用的一部分返回。
+
+此示例演示如何索引没有显式ID的文档：
+
+```
+POST /customer/_doc?pretty
+{
+  "name": "Jane Doe"
+}
+```
+
+注意，在上述情况下，我们使用的是后置动词而不是Put，因为我们没有指定ID。
+
+<h2>Updating Documents</h2>
+
+除了能够索引和替换文档外，我们还可以更新文档。请注意，虽然ElasticSearch实际上并不在引擎盖下进行就地更新。每当我们进行更新时，ElasticSearch都会删除旧文档，然后用一次更新对新文档进行索引。
+
+此示例显示如何通过将名称字段更改为“Jane Doe”来更新以前的文档（ID为1）：
+
+```
+POST /customer/_update/1?pretty
+{
+  "doc": { "name": "Jane Doe" }
+}
+```
+
+此示例演示如何通过将名称字段更改为“Jane Doe”来更新以前的文档（ID为1），同时向其添加年龄字段：
+
+```
+POST /customer/_update/1?pretty
+{
+  "doc": { "name": "Jane Doe", "age": 20 }
+}
+```
+
+也可以使用简单的脚本执行更新。此示例使用脚本将年龄增加5：
+
+```
+POST /customer/_update/1?pretty
+{
+  "script" : "ctx._source.age += 5"
+}
+```
+
+在上面的示例中，ctx.\u source指的是将要更新的当前源文档。
+
+ElasticSearch提供了在给定查询条件（如SQL update-where语句）下更新多个文档的功能。参见查询API更新文档
+
+<h2>Deleting Documents</h2>
+
+删除文档相当简单。此示例显示如何删除ID为2的以前的客户：
+
+```
+DELETE /customer/_doc/2?pretty
+```
+
+请参阅“按查询删除”API以删除与特定查询匹配的所有文档。值得注意的是，使用“按查询删除”API删除整个索引而不是删除所有文档的效率要高得多。
+
+<h2>Batch Processing</h2>
+
+除了能够索引、更新和删除单个文档之外，ElasticSearch还提供了使用批量API批量执行上述任何操作的能力。此功能非常重要，因为它提供了一种非常有效的机制，可以以尽可能少的网络往返速度尽可能快速地执行多个操作。
+
+作为一个简单示例，以下调用在一个批量操作中索引两个文档（ID 1-John Doe和ID 2-Jane Doe）：
+
+```
+POST /customer/_bulk?pretty
+{"index":{"_id":"1"}}
+{"name": "John Doe" }
+{"index":{"_id":"2"}}
+{"name": "Jane Doe" }
+```
+
+此示例更新第一个文档（ID为1），然后在一个批量操作中删除第二个文档（ID为2）：
+
+```
+POST /customer/_bulk?pretty
+{"update":{"_id":"1"}}
+{"doc": { "name": "John Doe becomes Jane Doe" } }
+{"delete":{"_id":"2"}}
+```
+
+请注意，对于删除操作，删除后没有对应的源文档，因为删除只需要删除文档的ID。
+
+批量API不会由于其中一个操作失败而失败。如果一个操作由于任何原因失败，它将继续处理后面的其余操作。当批量API返回时，它将为每个操作提供一个状态（以相同的发送顺序），以便您可以检查特定操作是否失败。
+
+<h2>Exploring Your Data</h2>
+
+<h3>Sample Dataset</h3>
+
+既然我们已经大致了解了基础知识，那么让我们试着研究一个更现实的数据集。我准备了一个客户银行账户信息的虚构JSON文档样本。每个文档都有以下架构：
+
+```
+{
+    "account_number": 0,
+    "balance": 16623,
+    "firstname": "Bradshaw",
+    "lastname": "Mckenzie",
+    "age": 29,
+    "gender": "F",
+    "address": "244 Columbus Place",
+    "employer": "Euron",
+    "email": "bradshawmckenzie@euron.com",
+    "city": "Hobucken",
+    "state": "CO"
+}
+```
+
+出于好奇，此数据是使用www.json-generator.com/生成的，因此请忽略数据的实际值和语义，因为这些都是随机生成的。
+
+加载示例数据集
+
+您可以从这里下载示例数据集（accounts.json）。将其提取到当前目录，然后按如下方式将其加载到集群中：
+
+```
+curl -H "Content-Type: application/json" -XPOST "localhost:9200/bank/_bulk?pretty&refresh" --data-binary "@accounts.json"
+curl "localhost:9200/_cat/indices?v"
+```
+
+答案是：
+
+```
+health status index uuid                   pri rep docs.count docs.deleted store.size pri.store.size
+yellow open   bank  l7sSYV2cQXmu6_4rJWVIww   5   1       1000            0    128.6kb        128.6kb
+```
+
+这意味着我们刚刚成功地将1000个文档批量索引到银行索引中。
+
+<h3>The Search API</h3>
+
+现在让我们从一些简单的搜索开始。运行搜索有两种基本方法：一种是通过REST请求URI发送搜索参数，另一种是通过REST请求主体发送搜索参数。请求主体方法允许您更具表现力，还可以用更可读的JSON格式定义搜索。我们将尝试一个请求URI方法的示例，但在本教程的其余部分中，我们将专门使用请求体方法。
+
+用于搜索的REST API可以从搜索端点访问。此示例返回银行索引中的所有文档：
+
+```
+GET /bank/_search?q=*&sort=account_number:asc&pretty
+```
+
+我们先分析一下搜索电话。我们正在银行索引中搜索（_search endpoint），Q=*参数指示ElasticSearch匹配索引中的所有文档。sort=account_number:asc参数指示使用每个文档的account_number字段按升序对结果进行排序。同样，pretty参数只告诉elasticsearch返回漂亮打印的JSON结果。
+
+以及响应（部分显示）：
+
+```
+{
+  "took" : 63,
+  "timed_out" : false,
+  "_shards" : {
+    "total" : 5,
+    "successful" : 5,
+    "skipped" : 0,
+    "failed" : 0
+  },
+  "hits" : {
+    "total" : {
+        "value": 1000,
+        "relation": "eq"
+    },
+    "max_score" : null,
+    "hits" : [ {
+      "_index" : "bank",
+      "_type" : "_doc",
+      "_id" : "0",
+      "sort": [0],
+      "_score" : null,
+      "_source" : {"account_number":0,"balance":16623,"firstname":"Bradshaw","lastname":"Mckenzie","age":29,"gender":"F","address":"244 Columbus Place","employer":"Euron","email":"bradshawmckenzie@euron.com","city":"Hobucken","state":"CO"}
+    }, {
+      "_index" : "bank",
+      "_type" : "_doc",
+      "_id" : "1",
+      "sort": [1],
+      "_score" : null,
+      "_source" : {"account_number":1,"balance":39225,"firstname":"Amber","lastname":"Duke","age":32,"gender":"M","address":"880 Holmes Lane","employer":"Pyrami","email":"amberduke@pyrami.com","city":"Brogan","state":"IL"}
+    }, ...
+    ]
+  }
+}
+```
+
+关于响应，我们看到以下部分：
+
+*ElasticSearch执行搜索所用的时间（毫秒）
+
+*超时–告诉我们搜索是否超时
+
+*_碎片-告诉我们搜索了多少碎片，以及搜索成功/失败的碎片的计数。
+
+*点击–搜索结果
+
+*hits.total–包含与搜索条件匹配的文档总数信息的对象
+
+*hits.total.value-总命中计数的值（必须在hits.total.relation上下文中解释）。
+
+*hits.total.relation-hits.total.value是确切的命中计数，在这种情况下，它等于“eq”或总命中计数的下限（大于或等于），在这种情况下，它等于gte。
+
+*hits.hits–搜索结果的实际数组（默认为前10个文档）
+
+*hits.sort-每个结果的排序键的排序值（如果按分数排序，则缺少该值）
+
+*点击。_score和max_score-暂时忽略这些字段
+
+hits.total的准确性由请求参数track_total_hits控制，当设置为true时，请求将准确跟踪总命中（“relation”：“eq”）。它默认为10000，这意味着总命中数精确跟踪多达10000个文档。您可以通过将track_total_hits显式设置为true强制进行精确计数。有关详细信息，请参阅请求主体文档。
+
+以下是使用备选请求正文方法进行的相同精确搜索：
+
+```
+GET /bank/_search
+{
+  "query": { "match_all": {} },
+  "sort": [
+    { "account_number": "asc" }
+  ]
+}
+```
+
+这里的区别在于，我们没有在URI中传递q=*，而是向SearchAPI提供一个JSON风格的查询请求体。我们将在下一节中讨论这个JSON查询。
+
+重要的是要理解，一旦您返回搜索结果，ElasticSearch将完全完成请求，并且不会维护任何类型的服务器端资源或在结果中打开光标。这与许多其他平台（如SQL）形成了鲜明的对比，在这些平台中，最初可能会提前获得查询结果的一部分子集，然后如果希望使用某种有状态的服务器端获取（或翻页）其余结果，则必须继续返回服务器。光标。
+
+<h2>Introducing the Query Language</h2>
+
+ElasticSearch提供了一种JSON风格的特定于域的语言，您可以使用它来执行查询。这被称为查询DSL。查询语言非常全面，乍一看可能很吓人，但实际学习它的最好方法是从几个基本示例开始。
+
+回到上一个例子，我们执行了这个查询：
+
+```
+GET /bank/_search
+{
+  "query": { "match_all": {} }
+}
+```
+
+仔细分析上面的内容，查询部分告诉我们查询定义是什么，匹配部分只是我们想要运行的查询类型。match_all查询只是搜索指定索引中的所有文档。
+
+除了查询参数，我们还可以传递其他参数来影响搜索结果。在上面部分的示例中，我们传入了sort，这里我们传入了size：
+
+```
+GET /bank/_search
+{
+  "query": { "match_all": {} },
+  "size": 1
+}
+```
+
+请注意，如果未指定大小，则默认为10。
+
+此示例执行“全部匹配”并返回文档10到19：
+
+```
+GET /bank/_search
+{
+  "query": { "match_all": {} },
+  "from": 10,
+  "size": 10
+}
+```
+
+“从”参数（基于0）指定从哪个文档索引开始，而“大小”参数指定从“从”参数开始返回多少文档。此功能在实现搜索结果的分页时很有用。请注意，如果未指定From，则默认为0。
+
+此示例执行“全部匹配”，并按帐户余额降序排序结果，并返回前10个（默认大小）文档。
+
+```
+GET /bank/_search
+{
+  "query": { "match_all": {} },
+  "sort": { "balance": { "order": "desc" } }
+}
+```
+
+<h2>Executing Searches</h2>
+
+既然我们已经看到了一些基本的搜索参数，那么让我们深入研究一下查询DSL。让我们先看看返回的文档字段。默认情况下，作为所有搜索的一部分返回完整的JSON文档。这被称为“源”（搜索命中中的“源”字段）。如果我们不希望返回整个源文档，我们可以只请求从源中返回几个字段。
+
+此示例显示如何从搜索中返回两个字段，即帐号和余额（在源内）
+
+```
+GET /bank/_search
+{
+  "query": { "match_all": {} },
+  "_source": ["account_number", "balance"]
+}
+```
+
+请注意，上面的示例只是减少了_source字段。它仍然只返回一个名为“源”的字段，但在其中，只包括“帐号”和“余额”字段。
+
+如果您来自SQL背景，那么上面的内容在概念上与从字段列表中选择SQL有些相似。
+
+现在让我们转到查询部分。以前，我们已经看到了match_all查询如何用于匹配所有文档。现在让我们介绍一个名为匹配查询的新查询，它可以被视为基本的字段化搜索查询（即针对特定字段或一组字段进行的搜索）。
+
+此示例返回编号为20的帐户：
+
+```
+GET /bank/_search
+{
+  "query": { "match": { "account_number": 20 } }
+}
+```
+
+此示例返回地址中包含术语“mill”的所有帐户：
+
+```
+GET /bank/_search
+{
+  "query": { "match": { "address": "mill" } }
+}
+```
+
+此示例返回地址中包含术语“mill”或“lane”的所有帐户：
+
+```
+GET /bank/_search
+{
+  "query": { "match": { "address": "mill lane" } }
+}
+```
+
+此示例是match（match_phrase）的变体，返回地址中包含短语“mill lane”的所有帐户：
+
+```
+GET /bank/_search
+{
+  "query": { "match_phrase": { "address": "mill lane" } }
+}
+```
+
+现在我们来介绍bool查询。bool查询允许我们使用布尔逻辑将较小的查询组合成较大的查询。
+
+此示例包含两个匹配查询，并返回地址中包含“mill”和“lane”的所有帐户：
+
+```
+GET /bank/_search
+{
+  "query": {
+    "bool": {
+      "must": [
+        { "match": { "address": "mill" } },
+        { "match": { "address": "lane" } }
+      ]
+    }
+  }
+}
+```
+
+在上面的示例中，bool must子句指定文档被视为匹配项时必须为true的所有查询。
+
+相反，此示例包含两个匹配查询，并返回地址中包含“mill”或“lane”的所有帐户：
+
+
+```
+GET /bank/_search
+{
+  "query": {
+    "bool": {
+      "should": [
+        { "match": { "address": "mill" } },
+        { "match": { "address": "lane" } }
+      ]
+    }
+  }
+}
+```
+
+在上面的示例中，bool should子句指定一个查询列表，其中任何一个查询必须为true，文档才能被视为匹配。
+
+此示例包含两个匹配查询，并返回地址中既不包含“mill”也不包含“lane”的所有帐户：
+
+```
+GET /bank/_search
+{
+  "query": {
+    "bool": {
+      "must_not": [
+        { "match": { "address": "mill" } },
+        { "match": { "address": "lane" } }
+      ]
+    }
+  }
+}
+```
+
+在上面的示例中，bool must_not子句指定一个查询列表，其中任何一个查询都不能为真，文档才能被视为匹配。
+
+我们可以在bool查询中同时组合must、should和must-not子句。此外，我们可以在这些bool子句中组合bool查询，以模拟任何复杂的多级布尔逻辑。
+
+此示例返回40岁但不在ID（AHO）中居住的任何人的所有帐户：
+
+```
+GET /bank/_search
+{
+  "query": {
+    "bool": {
+      "must": [
+        { "match": { "age": "40" } }
+      ],
+      "must_not": [
+        { "match": { "state": "ID" } }
+      ]
+    }
+  }
+}
+```
+
+<h2>Executing Filters</h2>
+
+在上一节中，我们跳过了一个称为文档得分（搜索结果中的得分字段）的小细节。分数是一个数值，它是文档与我们指定的搜索查询匹配程度的相对度量。得分越高，文件越相关，得分越低，文件越不相关。
+
+但是查询并不总是需要生成分数，特别是当它们只用于“过滤”文档集时。ElasticSearch检测到这些情况，并自动优化查询执行，以避免计算无用的分数。
+
+我们在前一节中介绍的bool查询还支持筛选子句，允许我们使用查询来限制将由其他子句匹配的文档，而不更改计算分数的方式。作为一个例子，让我们介绍范围查询，它允许我们按一系列值筛选文档。这通常用于数字或日期筛选。
+
+此示例使用bool查询返回余额在20000和30000之间（包括20000和30000）的所有帐户。换言之，我们希望找到余额大于或等于20000且小于或等于30000的账户。
+
+```
+GET /bank/_search
+{
+  "query": {
+    "bool": {
+      "must": { "match_all": {} },
+      "filter": {
+        "range": {
+          "balance": {
+            "gte": 20000,
+            "lte": 30000
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+仔细分析以上内容，bool查询包含一个match-all查询（查询部分）和一个range查询（筛选部分）。我们可以将任何其他查询替换为查询和筛选部分。在上述情况下，范围查询是完全有意义的，因为属于范围的文档都是“相等”匹配的，即没有文档比其他文档更相关。
+
+除了match ou all、match、bool和range查询之外，还有许多其他可用的查询类型，我们在这里不讨论它们。因为我们已经对它们的工作方式有了基本的了解，所以在学习和试验其他查询类型时应用这些知识应该不会太困难。
+
+<h2>Executing Aggregations</h2>
+
+聚合提供了从数据中分组和提取统计信息的能力。考虑聚合最简单的方法是大致将其等同于SQL Group By和SQL聚合函数。在ElasticSearch中，您可以执行返回点击数的搜索，同时返回与点击数分离的聚合结果。从某种意义上说，这是非常强大和高效的，您可以运行查询和多个聚合，并一次性获得这两个（或任何一个）操作的结果，避免使用简洁和简化的API进行网络往返。
+
+首先，此示例按状态对所有帐户进行分组，然后返回按计数降序排序的前10个（默认）状态（也是默认值）：
+
+```
+GET /bank/_search
+{
+  "size": 0,
+  "aggs": {
+    "group_by_state": {
+      "terms": {
+        "field": "state.keyword"
+      }
+    }
+  }
+}
+```
+
+在SQL中，上述聚合的概念类似于：
+
+```
+SELECT state, COUNT(*) FROM bank GROUP BY state ORDER BY COUNT(*) DESC LIMIT 10;
+```
+
+以及响应（部分显示）：
+
+```
+{
+  "took": 29,
+  "timed_out": false,
+  "_shards": {
+    "total": 5,
+    "successful": 5,
+    "skipped" : 0,
+    "failed": 0
+  },
+  "hits" : {
+     "total" : {
+        "value": 1000,
+        "relation": "eq"
+     },
+    "max_score" : null,
+    "hits" : [ ]
+  },
+  "aggregations" : {
+    "group_by_state" : {
+      "doc_count_error_upper_bound": 20,
+      "sum_other_doc_count": 770,
+      "buckets" : [ {
+        "key" : "ID",
+        "doc_count" : 27
+      }, {
+        "key" : "TX",
+        "doc_count" : 27
+      }, {
+        "key" : "AL",
+        "doc_count" : 25
+      }, {
+        "key" : "MD",
+        "doc_count" : 25
+      }, {
+        "key" : "TN",
+        "doc_count" : 23
+      }, {
+        "key" : "MA",
+        "doc_count" : 21
+      }, {
+        "key" : "NC",
+        "doc_count" : 21
+      }, {
+        "key" : "ND",
+        "doc_count" : 21
+      }, {
+        "key" : "ME",
+        "doc_count" : 20
+      }, {
+        "key" : "MO",
+        "doc_count" : 20
+      } ]
+    }
+  }
+}
+```
+
+我们可以看到，ID（爱达荷州）有27个账户，德克萨斯州有27个账户，阿拉巴马州有25个账户，以此类推。
+
+请注意，我们将size=0设置为不显示搜索结果，因为我们只希望在响应中看到聚合结果。
+
+基于前面的聚合，此示例按状态计算平均帐户余额（同样，仅针对按计数降序排序的前10个状态）：
+
+```
+GET /bank/_search
+{
+  "size": 0,
+  "aggs": {
+    "group_by_state": {
+      "terms": {
+        "field": "state.keyword"
+      },
+      "aggs": {
+        "average_balance": {
+          "avg": {
+            "field": "balance"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+请注意，我们如何将平均余额聚合嵌套在组内。这是所有聚合的通用模式。可以在聚合中任意嵌套聚合，以从数据中提取所需的透视汇总。
+
+基于前面的聚合，现在让我们按降序对平均余额进行排序：
+
+```
+GET /bank/_search
+{
+  "size": 0,
+  "aggs": {
+    "group_by_state": {
+      "terms": {
+        "field": "state.keyword",
+        "order": {
+          "average_balance": "desc"
+        }
+      },
+      "aggs": {
+        "average_balance": {
+          "avg": {
+            "field": "balance"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+这个例子演示了我们如何按年龄段（20-29岁、30-39岁和40-49岁）分组，然后按性别分组，最后得到每个年龄段每个性别的平均帐户余额：
+
+```
+GET /bank/_search
+{
+  "size": 0,
+  "aggs": {
+    "group_by_age": {
+      "range": {
+        "field": "age",
+        "ranges": [
+          {
+            "from": 20,
+            "to": 30
+          },
+          {
+            "from": 30,
+            "to": 40
+          },
+          {
+            "from": 40,
+            "to": 50
+          }
+        ]
+      },
+      "aggs": {
+        "group_by_gender": {
+          "terms": {
+            "field": "gender.keyword"
+          },
+          "aggs": {
+            "average_balance": {
+              "avg": {
+                "field": "balance"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+还有许多其他的聚合功能，我们在这里不详细介绍。如果您想做进一步的实验，《聚合参考指南》是一个很好的起点。
+
+<h2>Conclusion</h2>
+
+ElasticSearch是一个简单而复杂的产品。到目前为止，我们已经学习了它是什么的基本知识，如何查看它的内部，以及如何使用其他一些API来使用它。希望本教程能让您更好地了解ElasticSearch是什么，更重要的是，它鼓励您进一步试验它的其他伟大功能！
