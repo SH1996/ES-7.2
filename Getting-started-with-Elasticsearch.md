@@ -140,3 +140,191 @@ cd $env:PROGRAMFILES\Elastic\Elasticsearch\bin
 ```
 
 还请注意标记为http的行，其中包含可从中访问节点的http地址（192.168.8.112）和端口（9200）的信息。默认情况下，ElasticSearch使用端口9200提供对其RESTAPI的访问。如有必要，此端口可配置。
+
+<h2>Exploring Your Cluster</h2>
+
+<h3>The REST API</h3>
+
+现在我们已经启动并运行了节点（和集群），下一步就是了解如何与之通信。幸运的是，ElasticSearch提供了一个非常全面和强大的RESTAPI，您可以使用它与集群进行交互。可以使用API执行的少数操作如下：
+
+*检查集群、节点和索引的运行状况、状态和统计信息  
+*管理集群、节点和索引数据和元数据  
+*对索引执行CRUD（创建、读取、更新和删除）和搜索操作  
+*执行高级搜索操作，如分页、排序、筛选、脚本编写、聚合和许多其他操作  
+
+<h2>Cluster Health</h2>
+
+让我们从一个基本的健康检查开始，我们可以使用它来查看集群的运行情况。我们将使用curl来实现这一点，但您可以使用任何允许您进行HTTP/REST调用的工具。假设我们仍然在启动ElasticSearch并打开另一个命令shell窗口的同一个节点上。
+
+为了检查集群的运行状况，我们将使用_cat API。您可以在Kibana的控制台中运行下面的命令，方法是单击“在控制台中查看”，或者使用curl，方法是单击下面的“复制为curl”链接并将其粘贴到终端中。
+
+```
+GET /_cat/health?v
+```
+
+答案是：
+
+```
+epoch      timestamp cluster       status node.total node.data shards pri relo init unassign pending_tasks max_task_wait_time active_shards_percent
+1475247709 17:01:49  elasticsearch green           1         1      0   0    0    0        0             0                  -                100.0%
+```
+
+我们可以看到名为“elasticsearch”的集群处于绿色状态。
+
+每当我们请求集群健康时，我们要么得到绿色、黄色，要么得到红色。
+
+绿色-一切正常（集群功能齐全）  
+黄色-所有数据都可用，但某些副本尚未分配（群集完全正常工作）  
+红色  
+
+注意：当集群为红色时，它将继续提供来自可用碎片的搜索请求，但您可能需要尽快修复它，因为存在未分配的碎片。
+
+同样，从上面的响应中，我们可以看到总共1个节点，并且我们有0个碎片，因为我们在其中还没有数据。请注意，由于我们使用的是默认群集名称（ElasticSearch），并且由于ElasticSearch默认情况下使用单播网络发现在同一台计算机上查找其他节点，因此您可能会意外启动计算机上的多个节点，并让它们都加入一个cl。乌斯特。在这个场景中，您可能会在上面的响应中看到多个节点。
+
+我们还可以得到集群中的节点列表，如下所示：
+
+```
+GET /_cat/nodes?v
+```
+
+答案是：
+
+```
+ip        heap.percent ram.percent cpu load_1m load_5m load_15m node.role master name
+127.0.0.1           10           5   5    4.46                        mdi      *      PB2SGZY
+```
+
+在这里，我们可以看到一个名为“pb2sgzy”的节点，它是当前集群中的单个节点。
+ 
+<h2>List All Indices</h2>
+
+现在让我们来看看我们的指数：
+
+```
+GET /_cat/indices?v
+```
+
+答案是：
+
+```
+health status index uuid pri rep docs.count docs.deleted store.size pri.store.size
+```
+
+这就意味着我们在集群中还没有索引。
+
+<h2>Create an Index</h2>
+
+现在，让我们创建一个名为“customer”的索引，然后再次列出所有索引：
+
+```
+PUT /customer?pretty
+GET /_cat/indices?v
+```
+
+第一个命令使用put动词创建名为“customer”的索引。我们只需在调用的末尾附加pretty命令它漂亮地打印JSON响应（如果有的话）。
+
+答案是：
+
+```
+health status index    uuid                   pri rep docs.count docs.deleted store.size pri.store.size
+yellow open   customer 95SQ4TSUT7mWBT7VNHH67A   1   1          0            0       260b           260b
+```
+
+第二个命令的结果告诉我们，我们现在有一个名为customer的索引，它有一个主碎片和一个副本（默认值），其中包含零个文档。
+
+您可能还会注意到客户索引中有一个黄色的健康标签。回想我们之前的讨论，黄色意味着一些副本尚未分配。此索引发生这种情况的原因是，默认情况下，ElasticSearch为此索引创建了一个副本。因为目前只有一个节点在运行，所以在另一个节点加入集群之前，还不能分配一个副本（为了高可用性）。一旦该副本分配到第二个节点上，该索引的运行状况将变为绿色。
+
+<h2>Index and Query a Document</h2>
+
+现在我们把一些东西放到客户索引中。我们将在客户索引中索引一个简单的客户文档，其ID为1，如下所示：
+
+```
+PUT /customer/_doc/1?pretty
+{
+  "name": "John Doe"
+}
+```
+
+答案是：
+
+```
+{
+  "_index" : "customer",
+  "_type" : "_doc",
+  "_id" : "1",
+  "_version" : 1,
+  "result" : "created",
+  "_shards" : {
+    "total" : 2,
+    "successful" : 1,
+    "failed" : 0
+  },
+  "_seq_no" : 0,
+  "_primary_term" : 1
+}
+```
+
+从上面，我们可以看到在客户索引中成功地创建了一个新的客户文档。文档还有一个内部ID 1，我们在索引时指定了它。
+
+需要注意的是，ElasticSearch并不要求您在索引文档之前先显式创建索引。在上一个示例中，如果客户索引之前不存在，那么ElasticSearch将自动创建该索引。
+
+现在让我们检索刚才索引的文档：
+
+```
+GET /customer/_doc/1?pretty
+```
+
+答案是：
+
+```
+{
+  "_index" : "customer",
+  "_type" : "_doc",
+  "_id" : "1",
+  "_version" : 1,
+  "_seq_no" : 25,
+  "_primary_term" : 1,
+  "found" : true,
+  "_source" : { "name": "John Doe" }
+}
+```
+
+除了一个字段之外，这里没有发现任何异常的地方，说明我们找到了一个具有请求的ID 1的文档和另一个字段_source，它返回了我们从上一步索引的完整JSON文档。
+
+<h2>Delete an Index</h2>
+
+现在，让我们删除刚刚创建的索引，然后再次列出所有索引：
+
+```
+DELETE /customer?pretty
+GET /_cat/indices?v
+```
+
+答案是：
+
+```
+health status index uuid pri rep docs.count docs.deleted store.size pri.store.size
+```
+
+这意味着索引被成功地删除了，现在我们又回到了开始时集群中什么都没有的地方。
+
+在我们继续之前，让我们再仔细看看我们迄今为止学到的一些API命令：
+
+```
+PUT /customer
+PUT /customer/_doc/1
+{
+  "name": "John Doe"
+}
+GET /customer/_doc/1
+DELETE /customer
+```
+
+如果我们仔细研究上述命令，我们实际上可以看到在ElasticSearch中如何访问数据的模式。这种模式可以概括如下：
+
+```
+<HTTP Verb> /<Index>/<Endpoint>/<ID>
+```
+
+这种REST访问模式在所有API命令中都非常普遍，如果您能简单地记住它，那么您将在掌握ElasticSearch方面有一个很好的开端。
+
